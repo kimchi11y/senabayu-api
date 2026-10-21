@@ -1,6 +1,15 @@
 @Homestay.Api_HostAddress = http://localhost:5070
 
-GET {{Homestay.Api_HostAddress}}/weatherforecast/
+GET {{Homestay.Api_HostAddress}}/api/v1/room-types?locale=ms
 Accept: application/json
+
+###
+
+GET {{Homestay.Api_HostAddress}}/api/v1/room-types?locale=en
+Accept: application/json
+
+###
+
+GET {{Homestay.Api_HostAddress}}/health/ready
 
 ###

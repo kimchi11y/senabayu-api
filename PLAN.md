@@ -46,7 +46,7 @@ Non-goal: real reservations. The landing never promises a booked stay; the booki
 | 6 | Time budget | ~8–10 h/week, **4 weeks (~41 h)** | MVP (revised) |
 | 7 | Sequence | API skeleton live → SPA booking flow → invariant + admin → landing + portfolio | MVP |
 | 8 | Hosting | **API on Azure** (Azure for Students subscription, region Southeast Asia or whichever the subscription allows): image on **Azure Container Apps** (Consumption, scale-to-zero); **Azure Database for PostgreSQL Flexible Server** (smallest burstable SKU). **Landing and SPA on Cloudflare Pages** (free), each via Cloudflare's Git integration | MVP (revised 2026-10-21 b) |
-| 9 | Dev loop | Each repo runs on its own. API: Postgres in Docker via `compose.override.yml`, API debugged natively in Rider; prod-shaped `compose.yml` (api + db) for local verification. SPA: `pnpm dev` with `VITE_API_BASE_URL` pointing at the local or deployed API. Landing: `pnpm dev`, no dependencies | MVP (revised) |
+| 9 | Dev loop | Each repo runs on its own. API: one local-only `compose.yml` — `docker compose up -d db` for Postgres while the API runs in Rider (connection string in user-secrets), or the full api + db stack for container verification. SPA: `pnpm dev` with `VITE_API_BASE_URL` pointing at the local or deployed API. Landing: `pnpm dev`, no dependencies | MVP (revised) |
 | 10 | Landing data | **Room content hardcoded in the landing repo** (a typed data file / content collection), static output; WhatsApp is the real CTA; "Try the booking demo" links to the SPA. No build-time API fetch | MVP (revised 2026-10-21 b) |
 | 11 | Content | Real property; photos/copy later → placeholder imagery now, swap when it arrives | MVP |
 | 12 | Locale | `ms` + `en` with a visible switcher on the landing (cheap because content is placeholder); in the API, room text comes from locale columns | MVP |
@@ -146,7 +146,6 @@ senabayu-api/
 ├── .gitignore
 ├── Dockerfile                     # multi-stage: SDK -> aspnet runtime, non-root, healthcheck
 ├── compose.yml                    # local, production-shaped: api, db (+ volume, healthchecks, network)
-├── compose.override.yml           # dev: db only (+ adminer); API runs natively in Rider
 ├── .env.example
 ├── .github/workflows/
 │   ├── ci.yml                     # PRs + main: build, test, docker build

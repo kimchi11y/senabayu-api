@@ -47,29 +47,76 @@ landing, uploads, Bicep/Terraform, automated migrations in CD (M3), Application 
    once your first real controller works.
 
 ### S2 — Postgres in Docker (≈1 h)
-4. `compose.yml` (production-shaped) + `compose.override.yml` (dev). Postgres: pinned image tag (e.g.
-   `postgres:17-alpine` — use the same major you'll pick on Azure), **named volume**, healthcheck
-   (`pg_isready`), credentials from `.env`, port published only in the override file.
-5. Day-to-day: `docker compose up db` and run the API from Rider against it.
-6. Verify data survives `docker compose down && docker compose up`.
+How the pieces fit together, and the day-to-day commands: [`docs/guides/local-dev.md`](../guides/local-dev.md).
+
+4. One `compose.yml` (no override file — production is Azure, not compose, so this file is local-only).
+   Postgres: pinned `postgres:16-alpine` (Azure gets 16 too), **named volume**, `pg_isready` healthcheck,
+   `restart: unless-stopped`, credentials from `.env`, port `${DB_PORT}:5432`.
+5. `.env.example` with placeholder values for `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT`; real values in
+   `.env` (git-ignored).
+6. Connection string for running from Rider in **user-secrets**, never in a committed file:
+   `dotnet user-secrets set "ConnectionStrings:Default" "Host=localhost;Port=5432;Database=senabayu;Username=<DB_USER>;Password=<DB_PASSWORD>" --project Homestay.Api`
+7. Verify: `docker compose ps` shows the db `(healthy)`; data survives `docker compose down && docker compose up -d`.
+
+Status 2026-10-21: Postgres running, user-secret set. Still to do: healthcheck + `unless-stopped` in
+`compose.yml`, placeholder values in `.env.example`, commit.
 
 ### S3 — Domain, EF Core, first endpoint (≈3 h)
-7. Packages (all **10.0.x**, no prereleases): `Npgsql.EntityFrameworkCore.PostgreSQL`,
-   `Microsoft.EntityFrameworkCore.Design`.
-8. `Domain/`: `RoomType`, `Room`. Plain classes: **no EF attributes, no EF usings**.
-9. `Data/`: `AppDbContext`, `IEntityTypeConfiguration<RoomType>` / `<Room>` with keys, unique indexes
-   (`RoomType.Code`, `Room.Number`), money as `numeric(10,2)`, required fields. **Mapping lives here, not on the
-   entities.** Connection string from configuration (`ConnectionStrings:Default`), development value in
-   user-secrets or `appsettings.Development.json` pointing at the compose db — not a production value.
-10. `dotnet ef migrations add InitialCreate`, then read the migration: money column type, unique indexes,
-    nullability are what you intended.
-11. Seeder: 3 room types with `NameMs`/`NameEn`/`DescriptionMs`/`DescriptionEn`, prices in MYR, and 5 rooms.
-    Idempotent (safe to run twice). Run it from a dev-only path, not on every production start.
-12. `Dtos/RoomTypeDto.cs` and `Controllers/RoomTypesController.cs`: `[ApiController]`,
-    `[Route("api/v1/room-types")]`, `GET ?locale=ms|en` returning DTOs (never entities), active only, ordered.
-    Controller injects `AppDbContext` directly for now — there's no business logic yet to justify a service.
-13. Health checks: `GET /health/live` (process up) and `GET /health/ready` (checks Postgres — must actually fail
-    when the db is down). Use `AddHealthChecks()` + the Npgsql/EF health check.
+8. Packages — all on the 10.0.x line, no prereleases (latest stable as of 2026-10-21):
+   ```bash
+   dotnet add Homestay.Api package Npgsql.EntityFrameworkCore.PostgreSQL --version 10.0.3
+   dotnet add Homestay.Api package Microsoft.EntityFrameworkCore.Design --version 10.0.13
+   dotnet add Homestay.Api package Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore --version 10.0.13
+   ```
+9. `Domain/` — plain classes: **no `using Microsoft.EntityFrameworkCore`, no `[Key]`/`[Required]` attributes**.
+   - `RoomType`: `int Id`, `string Code` (e.g. `"DELUXE"`), `NameMs`, `NameEn`, `DescriptionMs`,
+     `DescriptionEn`, `decimal BasePricePerNight`, `int MaxGuests`, `int MinNights`,
+     `decimal ExtraGuestFeePerNight`, `bool IsActive`, `List<Room> Rooms`.
+   - `Room`: `int Id`, `int RoomTypeId`, `RoomType RoomType`, `string Number`, `bool IsActive`.
+   - Money is `decimal`, never `double`.
+10. `Data/` — all EF mapping lives here:
+    - `AppDbContext` with `DbSet<RoomType>`, `DbSet<Room>`; `OnModelCreating` calls
+      `modelBuilder.ApplyConfigurationsFromAssembly(...)`.
+    - `Data/Configurations/RoomTypeConfiguration.cs` (`IEntityTypeConfiguration<RoomType>`): unique index on
+      `Code`, `HasPrecision(10, 2)` on money, `IsRequired()` + `HasMaxLength(...)` on strings.
+    - `Data/Configurations/RoomConfiguration.cs`: unique index on `Number`, the relationship to `RoomType`.
+    - Same idea as `BookingSystem`'s `EntityConfigurations.cs`, one file per entity.
+    - **Checkpoint: send `Domain/` + `Data/` for review before generating the migration.**
+11. Register in `Program.cs`:
+    ```csharp
+    builder.Services.AddDbContext<AppDbContext>(o =>
+        o.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+    ```
+12. Seed with EF Core's `UseSeeding` / `UseAsyncSeeding` in the same `AddDbContext` options. EF runs them when
+    migrations are applied (`dotnet ef database update`, later the migrations bundle on Azure), not on every app
+    start. Idempotent: return early if any `RoomTypes` exist. 3 room types (ms + en names/descriptions, MYR
+    prices) and 5 rooms.
+13. Migration:
+    ```bash
+    dotnet ef migrations add InitialCreate --project Homestay.Api
+    ```
+    Read the generated file: money columns `numeric(10,2)`, unique indexes on `Code` and `Number`, strings with
+    lengths and `NOT NULL`. Then `dotnet ef database update --project Homestay.Api` and inspect the tables in
+    Rider's Database panel (+ → Data Source → PostgreSQL, `localhost:5432`).
+14. Endpoint:
+    - `Dtos/RoomTypeDto.cs`: a `record` with `Code`, `Name`, `Description`, `BasePricePerNight`, `MaxGuests`,
+      `MinNights` — `Name`/`Description` picked by locale.
+    - `Controllers/RoomTypesController.cs`: `[ApiController]`, `[Route("api/v1/room-types")]`, `[HttpGet]`
+      with `[FromQuery] string locale = "en"`; active only, ordered, mapped to the DTO. Inject `AppDbContext`
+      directly — no business logic yet to justify a service.
+    - DTOs, never entities: keeps internal fields and navigation properties out of the API, and the API's
+      response shapes don't change every time the database does.
+15. Health checks:
+    ```csharp
+    builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>(tags: ["ready"]);
+    // ...
+    app.MapHealthChecks("/health/live", new() { Predicate = _ => false });                  // process only
+    app.MapHealthChecks("/health/ready", new() { Predicate = c => c.Tags.Contains("ready") }); // checks the db
+    ```
+    Test: `docker compose stop db` → `/health/ready` unhealthy, `/health/live` still healthy.
+
+**S3 done when:** `GET /api/v1/room-types?locale=ms` in Swagger returns the seeded rooms with Malay names, and
+both health endpoints behave as above.
 
 ### S4 — Swagger + error contract (≈1 h)
 14. Swagger UI must work **in production too** for the demo (move it out of the `IsDevelopment()` block, or gate
@@ -84,8 +131,18 @@ landing, uploads, Bicep/Terraform, automated migrations in CD (M3), Application 
     `mcr.microsoft.com/dotnet/aspnet:10.0` runtime), cache-friendly (copy `.csproj` + restore before copying the
     rest), non-root (`USER $APP_UID`), listening on `8080` (`ASPNETCORE_HTTP_PORTS=8080`). Add a `.dockerignore`
     (`bin/`, `obj/`, `.git/`, `.idea/`, `.env`).
-18. Add `api` to `compose.yml`: connection string interpolated from `.env` with `Host=db`, `depends_on` the db with
-    `condition: service_healthy`.
+18. Add `api` to `compose.yml`, building the connection string from the same `.env` variables:
+    ```yaml
+      api:
+        build: .
+        ports:
+          - "8080:8080"
+        environment:
+          ConnectionStrings__Default: "Host=db;Port=5432;Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}"
+        depends_on:
+          db:
+            condition: service_healthy
+    ```
 19. Verify: `docker compose up --build` serves `http://localhost:8080/api/v1/room-types`; `docker compose exec api
     whoami` is not root; the runtime image has no SDK.
 
