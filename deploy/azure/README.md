@@ -213,7 +213,7 @@ az containerapp job create -g rg-senabayu -n senabayu-migrate --environment sena
 GitHub tokens name the repo with its numeric IDs (`gh api repos/kimchi11y/senabayu-api --jq "[.owner.id, .id]"`).
 
 A user-assigned managed identity that only `main` of this repo can log in as, limited to Container Apps in this
-resource group. There is no stored secret: the three values below are identifiers, so they are GitHub **variables**.
+resource group and the migration job. There is no stored secret: the three values below are identifiers, so they are GitHub **variables**.
 
 ```bash
 az provider register -n Microsoft.ManagedIdentity --wait
@@ -228,6 +228,12 @@ az role assignment create \
   --assignee-object-id "$(az identity show -g rg-senabayu -n senabayu-github-deploy --query principalId -o tsv)" \
   --assignee-principal-type ServicePrincipal --role "Container Apps Contributor" \
   --scope "$(az group show -n rg-senabayu --query id -o tsv)"
+
+# Without this role, job commands fail with a misleading "job does not exist".
+az role assignment create \
+  --assignee-object-id "$(az identity show -g rg-senabayu -n senabayu-github-deploy --query principalId -o tsv)" \
+  --assignee-principal-type ServicePrincipal --role "Container Apps Jobs Contributor" \
+  --scope "$(az containerapp job show -g rg-senabayu -n senabayu-migrate --query id -o tsv)"
 
 gh variable set AZURE_CLIENT_ID --body "$(az identity show -g rg-senabayu -n senabayu-github-deploy --query clientId -o tsv)"
 gh variable set AZURE_TENANT_ID --body "$(az account show --query tenantId -o tsv)"
