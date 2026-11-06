@@ -1,5 +1,10 @@
 using Homestay.Api.Data;
+using Homestay.Api.Infrastructure;
+using Homestay.Api.Services;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+
+const string BookingAppCors = "booking-app";
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,13 +32,41 @@ builder.Services.AddProblemDetails(options =>
             404 => "not_found",
             _ => "internal_error"
         }));
+builder.Services.AddExceptionHandler<BookingExceptionHandler>();
+
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<BookingService>();
+
+builder.Services.AddBookingRateLimits();
+
+// Tells browsers which sites may read responses. It doesn't stop scripts; rate limits and rules do that.
+builder.Services.AddCors(options => options.AddPolicy(BookingAppCors, policy => policy
+    .WithOrigins("https://senabayu-demo.hakimrazak.com", "http://localhost:5173")
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
+
+// Azure's ingress connects to the container on the visitor's behalf and adds their IP to X-Forwarded-For.
+// ForwardLimit 1 uses only the value the ingress added, so a visitor can't fake their IP to dodge rate limits.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+    options.ForwardLimit = 1;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 
-// First, so it catches exceptions thrown by everything after it.
+// Before the rate limiter, which needs the visitor's real IP.
+app.UseForwardedHeaders();
+
+// Before everything else that can throw, so it catches their exceptions.
 app.UseExceptionHandler();
+
+app.UseCors(BookingAppCors);
+app.UseRateLimiter();
 
 // Not limited to Development: the live demo link and the SPA's client generation use these.
 app.MapOpenApi();
