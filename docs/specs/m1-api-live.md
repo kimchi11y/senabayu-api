@@ -151,8 +151,8 @@ Record **every** `az` command you run, in order, in `deploy/azure/README.md`, wi
 
 20. Activate **Azure for Students**. Before creating anything: **Cost Management → Budget** (e.g. US$20/month)
     with email alerts at 50 % and 90 %.
-21. Install the Azure CLI + `containerapp` extension. Create resource group `rg-senabayu` in Southeast Asia (or the
-    region your subscription's policy allows — a policy error names the allowed regions).
+21. Install the Azure CLI + `containerapp` extension. Create resource group `rg-senabayu` in Malaysia West (Southeast Asia is blocked by the
+    subscription policy).
 22. **PostgreSQL Flexible Server** (connection string also needs `GSS Encryption Mode=Disable`, see `compose.yml`): Burstable B1ms, smallest storage, same major version as local, public access,
     firewall rule for **your IP only** plus "allow Azure services". Create database `senabayu` and an app login
     that isn't the server admin. TLS is required (`SSL Mode=Require` in the connection string).
