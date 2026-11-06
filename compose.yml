@@ -1,3 +1,6 @@
+# Host=db: containers reach each other by service name; localhost would be the container itself.
+x-db-connection: &db-connection "Host=db;Port=5432;Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD};GSS Encryption Mode=Disable"
+
 services:
   db:
     image: postgres:16-alpine
@@ -18,17 +21,26 @@ services:
       retries: 10
     shm_size: 128mb
 
+  # Applies migrations and seed data, then exits. The API waits for it to succeed.
+  migrate:
+    build:
+      context: .
+      target: migrator
+    command: ["--connection", *db-connection]
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build: .
     container_name: senabayu_api
     ports:
       - "8080:8080"
     environment:
-      # Host=db: containers reach each other by service name; localhost would be this container itself.
-      ConnectionStrings__Default: "Host=db;Port=5432;Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD};GSS Encryption Mode=Disable"
+      ConnectionStrings__Default: *db-connection
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

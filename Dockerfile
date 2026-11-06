@@ -10,7 +10,16 @@ RUN dotnet restore Homestay.Api/Homestay.Api.csproj
 COPY Homestay.Api/ Homestay.Api/
 RUN dotnet publish Homestay.Api/Homestay.Api.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
+# Optional stage for docker compose: applies migrations and seed data, then exits.
+# Only built when asked for by name (--target migrator); never part of the deployed image.
+FROM build AS migrator
+COPY dotnet-tools.json .
+RUN dotnet tool restore
+RUN dotnet ef migrations bundle --project Homestay.Api/Homestay.Api.csproj -o /app/efbundle --force
+ENTRYPOINT ["/app/efbundle"]
+
 # Stage 2: runtime. Only the ASP.NET runtime and the published output.
+# Last in the file, so a plain "docker build" produces this image.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .

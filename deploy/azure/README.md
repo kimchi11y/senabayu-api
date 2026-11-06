@@ -118,8 +118,11 @@ docker push ghcr.io/kimchi11y/senabayu-api:$SHA
 
 ## 6. Container Apps environment
 
+Set the mode explicitly. Without `--environment-mode`, the CLI (2.92) creates an **Express** environment, which
+rejects custom domains with `ExpressCustomDomainsNotSupported`.
+
 ```bash
-az containerapp env create -g rg-senabayu -n senabayu-env -l malaysiawest
+az containerapp env create -g rg-senabayu -n senabayu-env-std -l malaysiawest --environment-mode WorkloadProfiles
 ```
 
 ## 7. Container App
@@ -129,7 +132,7 @@ GitHub has no API for this. The connection string is a Container Apps secret, us
 
 ```bash
 SHA=$(git rev-parse HEAD)
-az containerapp create -g rg-senabayu -n senabayu-api --environment senabayu-env \
+az containerapp create -g rg-senabayu -n senabayu-api --environment senabayu-env-std --workload-profile-name Consumption \
   --image ghcr.io/kimchi11y/senabayu-api:$SHA --target-port 8080 --ingress external \
   --min-replicas 0 --max-replicas 2 --cpu 0.25 --memory 0.5Gi \
   --secrets "pg-connection=Host=$PG_HOST;Port=5432;Database=$PG_DB;Username=$PG_APP_USER;Password=$PG_APP_PASSWORD;SSL Mode=Require;GSS Encryption Mode=Disable" \
@@ -167,4 +170,53 @@ properties:
 ```bash
 az containerapp update -g rg-senabayu -n senabayu-api --yaml probes.yaml
 az containerapp logs show -g rg-senabayu -n senabayu-api --tail 50   # where the logs are
+```
+
+## 8. Custom domain
+
+In Cloudflare DNS, with the CNAME set to **DNS only** (grey cloud) so Azure can issue and renew the certificate:
+
+| Type | Name | Content |
+|---|---|---|
+| `CNAME` | `api.senabayu-demo` | the app's `*.azurecontainerapps.io` FQDN |
+| `TXT` | `asuid.api.senabayu-demo` | `az containerapp show -g rg-senabayu -n senabayu-api --query properties.customDomainVerificationId -o tsv` |
+
+```bash
+D=api.senabayu-demo.hakimrazak.com
+az containerapp hostname add -g rg-senabayu -n senabayu-api --hostname $D
+az containerapp hostname bind -g rg-senabayu -n senabayu-api --hostname $D \
+  --environment senabayu-env-std --validation-method CNAME
+```
+
+## 9. Deploys from GitHub Actions (OIDC)
+
+A user-assigned managed identity that only `main` of this repo can log in as, limited to Container Apps in this
+resource group. There is no stored secret: the three values below are identifiers, so they are GitHub **variables**.
+
+```bash
+az provider register -n Microsoft.ManagedIdentity --wait
+az identity create -g rg-senabayu -n senabayu-github-deploy -l malaysiawest
+
+az identity federated-credential create -g rg-senabayu --identity-name senabayu-github-deploy -n github-main \
+  --issuer https://token.actions.githubusercontent.com \
+  --subject repo:kimchi11y/senabayu-api:ref:refs/heads/main \
+  --audiences api://AzureADTokenExchange
+
+az role assignment create \
+  --assignee-object-id "$(az identity show -g rg-senabayu -n senabayu-github-deploy --query principalId -o tsv)" \
+  --assignee-principal-type ServicePrincipal --role "Container Apps Contributor" \
+  --scope "$(az group show -n rg-senabayu --query id -o tsv)"
+
+gh variable set AZURE_CLIENT_ID --body "$(az identity show -g rg-senabayu -n senabayu-github-deploy --query clientId -o tsv)"
+gh variable set AZURE_TENANT_ID --body "$(az account show --query tenantId -o tsv)"
+gh variable set AZURE_SUBSCRIPTION_ID --body "$(az account show --query id -o tsv)"
+```
+
+The GHCR package was first pushed by hand, so the workflow's `GITHUB_TOKEN` needs access: package settings → Manage
+Actions access → Add Repository → `senabayu-api` → role **Write**.
+
+To roll back, point the app at an earlier commit's image:
+
+```bash
+az containerapp update -g rg-senabayu -n senabayu-api --image ghcr.io/kimchi11y/senabayu-api:<earlier-sha>
 ```

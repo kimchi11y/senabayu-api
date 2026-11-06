@@ -1,0 +1,77 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+# A newer push waits for the running deploy, so two can't overlap.
+concurrency:
+  group: deploy
+
+env:
+  IMAGE: ghcr.io/kimchi11y/senabayu-api:${{ github.sha }}
+  RESOURCE_GROUP: rg-senabayu
+  APP_NAME: senabayu-api
+  HEALTH_URL: https://api.senabayu-demo.hakimrazak.com/health/ready
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the image with GITHUB_TOKEN
+      id-token: write # log in to Azure with OIDC; no stored Azure secret
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Tagged by commit SHA, so any revision can be traced to its code and rolled back to.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Roll out the new image
+        run: |
+          az extension add --name containerapp --upgrade --only-show-errors
+          az containerapp update -g "$RESOURCE_GROUP" -n "$APP_NAME" --image "$IMAGE" --only-show-errors -o none
+
+      - name: Wait for the new revision to take traffic
+        run: |
+          for attempt in $(seq 1 30); do
+            serving=$(az containerapp revision list -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+              --query "[?properties.trafficWeight > \`0\`].properties.template.containers[0].image" -o tsv --only-show-errors)
+            if [ "$serving" = "$IMAGE" ]; then
+              echo "Serving $IMAGE"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out; still serving: $serving"
+          exit 1
+
+      - name: Smoke test
+        run: curl --fail --silent --show-error --retry 10 --retry-delay 10 --retry-all-errors --max-time 60 "$HEALTH_URL"

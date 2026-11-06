@@ -148,7 +148,7 @@ senabayu-api/
 ├── compose.yml                    # local, production-shaped: api, db (+ volume, healthchecks, network)
 ├── .env.example
 ├── .github/workflows/
-│   ├── ci.yml                     # PRs + main: build, test, docker build
+│   ├── ci.yml                     # PRs, and called by deploy.yml on main: build, test, docker build
 │   └── deploy.yml                 # main: build+push image to GHCR -> OIDC login -> az containerapp update
 ├── deploy/
 │   └── azure/README.md            # every az CLI command used to create the resources, in order (runbook)
