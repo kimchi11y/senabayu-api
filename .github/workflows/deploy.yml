@@ -14,8 +14,10 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/kimchi11y/senabayu-api:${{ github.sha }}
+  MIGRATOR_IMAGE: ghcr.io/kimchi11y/senabayu-api:migrator-${{ github.sha }}
   RESOURCE_GROUP: rg-senabayu
   APP_NAME: senabayu-api
+  MIGRATION_JOB: senabayu-migrate
   HEALTH_URL: https://api.senabayu-demo.hakimrazak.com/health/ready
 
 jobs:
@@ -48,15 +50,43 @@ jobs:
           tags: ${{ env.IMAGE }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: migrator
+          push: true
+          tags: ${{ env.MIGRATOR_IMAGE }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
       - uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - run: az extension add --name containerapp --upgrade --only-show-errors
+
+      # Runs inside Azure with the admin login held there as a secret, so GitHub never sees it. It goes first because
+      # migrations are additive: the old API keeps working on the new schema, but not the other way round.
+      - name: Apply database migrations
+        run: |
+          az containerapp job update -g "$RESOURCE_GROUP" -n "$MIGRATION_JOB" --image "$MIGRATOR_IMAGE" --only-show-errors -o none
+          execution=$(az containerapp job start -g "$RESOURCE_GROUP" -n "$MIGRATION_JOB" --query name -o tsv --only-show-errors)
+          echo "Started $execution"
+          for attempt in $(seq 1 60); do
+            status=$(az containerapp job execution show -g "$RESOURCE_GROUP" -n "$MIGRATION_JOB" \
+              --job-execution-name "$execution" --query properties.status -o tsv --only-show-errors)
+            case "$status" in
+              Succeeded) echo "Migrations applied"; exit 0 ;;
+              Failed|Stopped|Degraded) echo "Migration job ended as $status"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Timed out; last status: $status"
+          exit 1
+
       - name: Roll out the new image
         run: |
-          az extension add --name containerapp --upgrade --only-show-errors
           az containerapp update -g "$RESOURCE_GROUP" -n "$APP_NAME" --image "$IMAGE" --only-show-errors -o none
 
       - name: Wait for the new revision to take traffic

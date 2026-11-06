@@ -1,8 +1,11 @@
 using System.Text.Json.Serialization;
 using Homestay.Api.Data;
+using Homestay.Api.Domain;
 using Homestay.Api.Infrastructure;
 using Homestay.Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 const string BookingAppCors = "booking-app";
@@ -23,8 +26,9 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<AppDbContext>(options => options
     .UseNpgsql(builder.Configuration.GetConnectionString("Default"))
     // Runs when migrations are applied (dotnet ef database update / migrations bundle), not on app start.
-    .UseSeeding((context, _) => SeedData.Seed(context))
-    .UseAsyncSeeding((context, _, cancellationToken) => SeedData.SeedAsync(context, cancellationToken)));
+    .UseSeeding((context, _) => SeedData.Seed(context, builder.Configuration))
+    .UseAsyncSeeding((context, _, cancellationToken) =>
+        SeedData.SeedAsync(context, builder.Configuration, cancellationToken)));
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>(tags: ["ready"]);
@@ -35,6 +39,8 @@ builder.Services.AddProblemDetails(options =>
         context.ProblemDetails.Extensions.TryAdd("code", context.ProblemDetails.Status switch
         {
             400 => "validation_error",
+            401 => "unauthorized",
+            403 => "forbidden",
             404 => "not_found",
             _ => "internal_error"
         }));
@@ -42,6 +48,13 @@ builder.Services.AddExceptionHandler<BookingExceptionHandler>();
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<BookingService>();
+builder.Services.AddScoped<AdminAuthService>();
+builder.Services.AddSingleton<JwtTokens>();
+builder.Services.AddSingleton<IPasswordHasher<AdminUser>, PasswordHasher<AdminUser>>();
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options => JwtTokens.Configure(options, builder.Configuration));
+builder.Services.AddAuthorization();
 
 builder.Services.AddBookingRateLimits();
 
@@ -71,6 +84,9 @@ app.UseForwardedHeaders();
 // Before everything else that can throw, so it catches their exceptions.
 app.UseExceptionHandler();
 
+// Gives empty error responses a ProblemDetails body, like the 401 from a missing token.
+app.UseStatusCodePages();
+
 app.UseCors(BookingAppCors);
 app.UseRateLimiter();
 
@@ -78,6 +94,7 @@ app.UseRateLimiter();
 app.MapOpenApi();
 app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "Senabayu API v1"));
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
@@ -87,3 +104,6 @@ app.MapHealthChecks("/health/live", new() { Predicate = _ => false });
 app.MapHealthChecks("/health/ready", new() { Predicate = check => check.Tags.Contains("ready") });
 
 app.Run();
+
+// Lets the integration tests start this app.
+public partial class Program;

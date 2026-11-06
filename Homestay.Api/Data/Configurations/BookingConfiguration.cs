@@ -25,9 +25,6 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
         // Stored as text, so the column reads "Pending" rather than 0.
         builder.Property(b => b.Status).HasConversion<string>().HasMaxLength(16);
 
-        // Speeds up the availability query, which looks up a room's bookings by date.
-        builder.HasIndex(b => new { b.RoomId, b.CheckIn, b.CheckOut });
-
         builder.HasOne(b => b.RoomType).WithMany().HasForeignKey(b => b.RoomTypeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(b => b.Room).WithMany().HasForeignKey(b => b.RoomId).OnDelete(DeleteBehavior.Restrict);
     }

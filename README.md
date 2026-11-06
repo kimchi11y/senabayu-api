@@ -40,10 +40,14 @@ To run the API from your IDE instead, see [the local development guide](docs/gui
 dotnet test
 ```
 
+The integration tests start a real Postgres in Docker, so Docker needs to be running. The main one fires 20 simultaneous
+bookings at one room and expects exactly one to succeed. [Here's what it caught](docs/notes/m3-double-booking-proof.md)
+before the fix.
+
 ## Deployment
 
-Each push to `main` runs the tests, builds an image tagged with the commit SHA, pushes it to GHCR, rolls it out to
-Container Apps, and smoke-tests `/health/ready`. GitHub logs in to Azure with OIDC, so no Azure credential is stored
-in GitHub.
+Each push to `main` runs the tests, builds images tagged with the commit SHA, pushes them to GHCR, applies migrations
+with a Container Apps job, rolls out the API, and smoke-tests `/health/ready`. GitHub logs in to Azure with OIDC, so no Azure credential is
+stored in GitHub.
 
 Every command used to create the Azure resources is in [the runbook](deploy/azure/README.md).

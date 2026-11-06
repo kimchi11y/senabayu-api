@@ -22,6 +22,37 @@ namespace Homestay.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Homestay.Api.Domain.AdminUser", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.ToTable("AdminUsers");
+                });
+
             modelBuilder.Entity("Homestay.Api.Domain.Booking", b =>
                 {
                     b.Property<int>("Id")
@@ -98,11 +129,45 @@ namespace Homestay.Api.Migrations
                     b.HasIndex("Reference")
                         .IsUnique();
 
+                    b.HasIndex("RoomId");
+
                     b.HasIndex("RoomTypeId");
 
-                    b.HasIndex("RoomId", "CheckIn", "CheckOut");
-
                     b.ToTable("Bookings");
+                });
+
+            modelBuilder.Entity("Homestay.Api.Domain.BookingNight", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BookingId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("NightDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("RoomId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId");
+
+                    b.HasIndex("RoomId", "NightDate")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BookingNights_Room_Night_Active")
+                        .HasFilter("\"Status\" <> 'Cancelled'");
+
+                    b.ToTable("BookingNights");
                 });
 
             modelBuilder.Entity("Homestay.Api.Domain.Room", b =>
@@ -211,6 +276,25 @@ namespace Homestay.Api.Migrations
                     b.Navigation("RoomType");
                 });
 
+            modelBuilder.Entity("Homestay.Api.Domain.BookingNight", b =>
+                {
+                    b.HasOne("Homestay.Api.Domain.Booking", "Booking")
+                        .WithMany("BookedNights")
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Homestay.Api.Domain.Room", "Room")
+                        .WithMany()
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+
+                    b.Navigation("Room");
+                });
+
             modelBuilder.Entity("Homestay.Api.Domain.Room", b =>
                 {
                     b.HasOne("Homestay.Api.Domain.RoomType", "RoomType")
@@ -220,6 +304,11 @@ namespace Homestay.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("RoomType");
+                });
+
+            modelBuilder.Entity("Homestay.Api.Domain.Booking", b =>
+                {
+                    b.Navigation("BookedNights");
                 });
 
             modelBuilder.Entity("Homestay.Api.Domain.RoomType", b =>

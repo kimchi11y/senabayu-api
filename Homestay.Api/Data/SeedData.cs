@@ -1,4 +1,5 @@
 using Homestay.Api.Domain;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Homestay.Api.Data;
@@ -9,20 +10,39 @@ namespace Homestay.Api.Data;
 /// </summary>
 public static class SeedData
 {
-    public static void Seed(DbContext context)
+    public static void Seed(DbContext context, IConfiguration configuration)
     {
-        if (context.Set<RoomType>().Any()) return;
+        if (!context.Set<RoomType>().Any())
+            context.Set<RoomType>().AddRange(CreateRoomTypes());
 
-        context.Set<RoomType>().AddRange(CreateRoomTypes());
+        if (!context.Set<AdminUser>().Any() && CreateAdmin(configuration) is { } admin)
+            context.Set<AdminUser>().Add(admin);
+
         context.SaveChanges();
     }
 
-    public static async Task SeedAsync(DbContext context, CancellationToken cancellationToken)
+    public static async Task SeedAsync(
+        DbContext context, IConfiguration configuration, CancellationToken cancellationToken)
     {
-        if (await context.Set<RoomType>().AnyAsync(cancellationToken)) return;
+        if (!await context.Set<RoomType>().AnyAsync(cancellationToken))
+            context.Set<RoomType>().AddRange(CreateRoomTypes());
 
-        context.Set<RoomType>().AddRange(CreateRoomTypes());
+        if (!await context.Set<AdminUser>().AnyAsync(cancellationToken) && CreateAdmin(configuration) is { } admin)
+            context.Set<AdminUser>().Add(admin);
+
         await context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>The login comes from configuration, not the repo. With none set, no admin is created.</summary>
+    private static AdminUser? CreateAdmin(IConfiguration configuration)
+    {
+        var email = configuration["Admin:Email"];
+        var password = configuration["Admin:Password"];
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrEmpty(password)) return null;
+
+        var admin = new AdminUser { Email = email.Trim().ToLowerInvariant() };
+        admin.PasswordHash = new PasswordHasher<AdminUser>().HashPassword(admin, password);
+        return admin;
     }
 
     private static List<RoomType> CreateRoomTypes() =>

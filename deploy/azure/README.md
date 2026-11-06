@@ -188,7 +188,27 @@ az containerapp hostname bind -g rg-senabayu -n senabayu-api --hostname $D \
   --environment senabayu-env-std --validation-method CNAME
 ```
 
-## 9. Deploys from GitHub Actions (OIDC)
+## 9. API signing key and migration job
+
+Values come from `.env.azure`. The job runs the migrator image with the admin login, which only Azure holds. The image
+here is a placeholder, because every deploy replaces it. Setting `Admin__Email` and `Admin__Password` creates the admin
+login the first time the job runs, if none exists yet.
+
+```bash
+az containerapp secret set -g rg-senabayu -n senabayu-api --secrets "jwt-signing-key=$JWT_SIGNING_KEY"
+az containerapp update -g rg-senabayu -n senabayu-api --set-env-vars "Jwt__SigningKey=secretref:jwt-signing-key"
+
+az containerapp job create -g rg-senabayu -n senabayu-migrate --environment senabayu-env-std \
+  --workload-profile-name Consumption --trigger-type Manual \
+  --replica-timeout 600 --replica-retry-limit 0 --parallelism 1 --replica-completion-count 1 \
+  --image mcr.microsoft.com/dotnet/aspnet:10.0 --cpu 0.25 --memory 0.5Gi \
+  --secrets "pg-admin-connection=Host=$PG_HOST;Port=5432;Database=$PG_DB;Username=$PG_ADMIN_USER;Password=$PG_ADMIN_PASSWORD;SSL Mode=Require;GSS Encryption Mode=Disable" \
+            "admin-password=$ADMIN_PASSWORD" \
+  --env-vars "ConnectionStrings__Default=secretref:pg-admin-connection" \
+             "Admin__Email=$ADMIN_EMAIL" "Admin__Password=secretref:admin-password"
+```
+
+## 10. Deploys from GitHub Actions (OIDC)
 
 GitHub tokens name the repo with its numeric IDs (`gh api repos/kimchi11y/senabayu-api --jq "[.owner.id, .id]"`).
 

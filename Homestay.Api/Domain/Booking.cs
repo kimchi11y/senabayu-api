@@ -43,4 +43,15 @@ public class Booking
 
     public BookingStatus Status { get; set; } = BookingStatus.Pending;
     public DateTimeOffset CreatedAt { get; set; }
+
+    public List<BookingNight> BookedNights { get; set; } = [];
+
+    /// <summary>Pending can go either way, Confirmed can still be cancelled, and Cancelled is final.</summary>
+    public bool CanChangeTo(BookingStatus next) => (Status, next) switch
+    {
+        (BookingStatus.Pending, BookingStatus.Confirmed) => true,
+        (BookingStatus.Pending, BookingStatus.Cancelled) => true,
+        (BookingStatus.Confirmed, BookingStatus.Cancelled) => true,
+        _ => false
+    };
 }

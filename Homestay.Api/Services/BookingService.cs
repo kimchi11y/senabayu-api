@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using Homestay.Api.Data;
+using Homestay.Api.Data.Configurations;
 using Homestay.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Homestay.Api.Services;
 
@@ -31,17 +33,13 @@ public class BookingService(AppDbContext db, TimeProvider clock)
     {
         ValidateDates(checkIn, checkOut);
 
+        var freeRooms = FreeRooms(checkIn, checkOut);
+
         return await db.RoomTypes
             .AsNoTracking()
             .Where(t => t.IsActive)
             .OrderBy(t => t.BasePricePerNight)
-            .Select(t => new RoomAvailability(
-                t.Code,
-                t.Rooms.Count(r => r.IsActive && !db.Bookings.Any(b =>
-                    b.RoomId == r.Id
-                    && b.Status != BookingStatus.Cancelled
-                    && b.CheckIn < checkOut
-                    && b.CheckOut > checkIn))))
+            .Select(t => new RoomAvailability(t.Code, freeRooms.Count(r => r.RoomTypeId == t.Id)))
             .ToListAsync(cancellationToken);
     }
 
@@ -55,52 +53,63 @@ public class BookingService(AppDbContext db, TimeProvider clock)
     }
 
     /// <summary>
-    /// Deliberately naive: it checks for a free room, then inserts. Two simultaneous requests can both pass the check
-    /// and double-book. Milestone 3 proves this with a test, then fixes it with a database constraint.
+    /// Takes the first free room of the type. The free-room check only picks a candidate: what actually prevents a
+    /// double booking is the unique index on BookingNights, because two requests can both pass the check at once.
+    /// The loser of that race tries the next free room, and gets a 409 once none are left.
     /// </summary>
     public async Task<Booking> CreateAsync(NewBooking request, CancellationToken cancellationToken)
     {
         var roomType = await FindRoomTypeAsync(request.RoomTypeCode, cancellationToken);
         ValidateStay(roomType, request.CheckIn, request.CheckOut, request.GuestCount);
 
-        var roomId = await db.Rooms
-            .Where(r => r.RoomTypeId == roomType.Id && r.IsActive)
-            .Where(r => !db.Bookings.Any(b =>
-                b.RoomId == r.Id
-                && b.Status != BookingStatus.Cancelled
-                && b.CheckIn < request.CheckOut
-                && b.CheckOut > request.CheckIn))
-            .OrderBy(r => r.Number)
-            .Select(r => (int?)r.Id)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new BookingException(
-                StatusCodes.Status409Conflict, "room_unavailable", "No room of this type is free for those dates.");
-
         var quote = PricingService.Calculate(roomType, request.CheckIn, request.CheckOut, request.GuestCount);
 
-        var booking = new Booking
+        // Ends because each failed attempt means another request just took a room, and that room is no longer free.
+        while (true)
         {
-            Reference = GenerateReference(),
-            RoomTypeId = roomType.Id,
-            RoomType = roomType,
-            RoomId = roomId,
-            CheckIn = request.CheckIn,
-            CheckOut = request.CheckOut,
-            GuestName = request.GuestName.Trim(),
-            Email = NormalizeEmail(request.Email),
-            Phone = request.Phone.Trim(),
-            GuestCount = request.GuestCount,
-            Nights = quote.Nights,
-            PricePerNightSnapshot = quote.PricePerNight,
-            ExtraGuestFee = quote.ExtraGuestFee,
-            TotalAmount = quote.Total,
-            CreatedAt = clock.GetUtcNow()
-        };
+            var roomId = await FreeRooms(request.CheckIn, request.CheckOut)
+                .Where(r => r.RoomTypeId == roomType.Id)
+                .OrderBy(r => r.Number)
+                .Select(r => (int?)r.Id)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new BookingException(
+                    StatusCodes.Status409Conflict, "room_unavailable", "No room of this type is free for those dates.");
 
-        db.Bookings.Add(booking);
-        await db.SaveChangesAsync(cancellationToken);
+            var booking = new Booking
+            {
+                Reference = GenerateReference(),
+                RoomTypeId = roomType.Id,
+                RoomType = roomType,
+                RoomId = roomId,
+                CheckIn = request.CheckIn,
+                CheckOut = request.CheckOut,
+                GuestName = request.GuestName.Trim(),
+                Email = NormalizeEmail(request.Email),
+                Phone = request.Phone.Trim(),
+                GuestCount = request.GuestCount,
+                Nights = quote.Nights,
+                PricePerNightSnapshot = quote.PricePerNight,
+                ExtraGuestFee = quote.ExtraGuestFee,
+                TotalAmount = quote.Total,
+                CreatedAt = clock.GetUtcNow(),
+                BookedNights = Enumerable.Range(0, quote.Nights)
+                    .Select(i => new BookingNight { RoomId = roomId, NightDate = request.CheckIn.AddDays(i) })
+                    .ToList()
+            };
 
-        return booking;
+            db.Bookings.Add(booking);
+            try
+            {
+                // One transaction: the booking and all its nights are saved together, or none of them are.
+                await db.SaveChangesAsync(cancellationToken);
+                return booking;
+            }
+            catch (DbUpdateException e) when (IsDoubleBooking(e))
+            {
+                db.Entry(booking).State = EntityState.Detached;
+                booking.BookedNights.ForEach(night => db.Entry(night).State = EntityState.Detached);
+            }
+        }
     }
 
     /// <summary>Needs both values, so nobody can browse other guests' bookings by guessing references.</summary>
@@ -118,10 +127,86 @@ public class BookingService(AppDbContext db, TimeProvider clock)
                    StatusCodes.Status404NotFound, "booking_not_found", "No booking matches that reference and email.");
     }
 
+    public async Task<(List<Booking> Items, int Total)> ListAsync(
+        BookingStatus? status, int page, int pageSize, CancellationToken cancellationToken)
+    {
+        var query = db.Bookings.AsNoTracking();
+        if (status is not null)
+            query = query.Where(b => b.Status == status);
+
+        var total = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Include(b => b.RoomType)
+            .Include(b => b.Room)
+            .OrderByDescending(b => b.CreatedAt)
+            .ThenByDescending(b => b.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, total);
+    }
+
+    public async Task<Booking> ConfirmAsync(int id, CancellationToken cancellationToken)
+    {
+        var booking = await LoadForChangeAsync(id, BookingStatus.Confirmed, cancellationToken);
+        booking.Status = BookingStatus.Confirmed;
+        await db.SaveChangesAsync(cancellationToken);
+        return booking;
+    }
+
+    /// <summary>Cancelling its nights too is what frees the room: the unique index ignores cancelled nights.</summary>
+    public async Task<Booking> CancelAsync(int id, CancellationToken cancellationToken)
+    {
+        var booking = await LoadForChangeAsync(id, BookingStatus.Cancelled, cancellationToken);
+        booking.Status = BookingStatus.Cancelled;
+        booking.BookedNights.ForEach(night => night.Status = BookingNightStatus.Cancelled);
+        await db.SaveChangesAsync(cancellationToken);
+        return booking;
+    }
+
+    /// <summary>Nights go with them, through the foreign key's cascade delete.</summary>
+    public Task DeleteAllAsync(CancellationToken cancellationToken) =>
+        db.Bookings.ExecuteDeleteAsync(cancellationToken);
+
+    private async Task<Booking> LoadForChangeAsync(int id, BookingStatus next, CancellationToken cancellationToken)
+    {
+        var booking = await db.Bookings
+                .Include(b => b.RoomType)
+                .Include(b => b.Room)
+                .Include(b => b.BookedNights)
+                .FirstOrDefaultAsync(b => b.Id == id, cancellationToken)
+            ?? throw new BookingException(
+                StatusCodes.Status404NotFound, "booking_not_found", $"Booking {id} doesn't exist.");
+
+        if (!booking.CanChangeTo(next))
+            throw new BookingException(
+                StatusCodes.Status409Conflict,
+                "invalid_transition",
+                $"A {booking.Status.ToString().ToLowerInvariant()} booking can't become {next.ToString().ToLowerInvariant()}.");
+
+        return booking;
+    }
+
     private async Task<RoomType> FindRoomTypeAsync(string code, CancellationToken cancellationToken) =>
         await db.RoomTypes.FirstOrDefaultAsync(t => t.Code == code && t.IsActive, cancellationToken)
         ?? throw new BookingException(
             StatusCodes.Status404NotFound, "room_type_not_found", $"Room type '{code}' doesn't exist.");
+
+    /// <summary>Active rooms with no active night in [checkIn, checkOut). Check-out day itself stays bookable.</summary>
+    private IQueryable<Room> FreeRooms(DateOnly checkIn, DateOnly checkOut) =>
+        db.Rooms.Where(r => r.IsActive && !db.BookingNights.Any(n =>
+            n.RoomId == r.Id
+            && n.Status == BookingNightStatus.Active
+            && n.NightDate >= checkIn
+            && n.NightDate < checkOut));
+
+    private static bool IsDoubleBooking(DbUpdateException exception) =>
+        exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: BookingNightConfiguration.ActiveNightIndex
+        };
 
     private void ValidateDates(DateOnly checkIn, DateOnly checkOut)
     {

@@ -26,7 +26,10 @@ services:
     build:
       context: .
       target: migrator
-    command: ["--connection", *db-connection]
+    environment:
+      ConnectionStrings__Default: *db-connection
+      Admin__Email: ${ADMIN_EMAIL}
+      Admin__Password: ${ADMIN_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
@@ -38,6 +41,7 @@ services:
       - "8080:8080"
     environment:
       ConnectionStrings__Default: *db-connection
+      Jwt__SigningKey: ${JWT_SIGNING_KEY}
     depends_on:
       migrate:
         condition: service_completed_successfully
