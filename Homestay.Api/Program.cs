@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Homestay.Api.Data;
 using Homestay.Api.Infrastructure;
 using Homestay.Api.Services;
@@ -10,7 +11,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
+// Numbers are only numbers. The web default also accepts "2" as 2, which makes the OpenAPI document
+// describe every number as "integer or string" and the generated TypeScript types follow it.
+builder.Services.AddControllers()
+    .AddJsonOptions(options => options.JsonSerializerOptions.NumberHandling = JsonNumberHandling.Strict);
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 

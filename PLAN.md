@@ -46,7 +46,7 @@ Non-goal: real reservations. The landing never promises a booked stay; the booki
 | 6 | Time budget | ~8–10 h/week, **4 weeks (~41 h)** | MVP (revised) |
 | 7 | Sequence | API skeleton live → SPA booking flow → invariant + admin → landing + portfolio | MVP |
 | 8 | Hosting | **API on Azure** (Azure for Students subscription, region **Malaysia West**, which the subscription policy allows; Southeast Asia is blocked): image on **Azure Container Apps** (Consumption, scale-to-zero); **Azure Database for PostgreSQL Flexible Server** (smallest burstable SKU). **Landing and SPA on Cloudflare Pages** (free), each via Cloudflare's Git integration | MVP (revised 2026-10-21 b) |
-| 9 | Dev loop | Each repo runs on its own. API: one local-only `compose.yml` — `docker compose up -d db` for Postgres while the API runs in Rider (connection string in user-secrets), or the full api + db stack for container verification. SPA: `pnpm dev` with `VITE_API_BASE_URL` pointing at the local or deployed API. Landing: `pnpm dev`, no dependencies | MVP (revised) |
+| 9 | Dev loop | Each repo runs on its own. API: one local-only `compose.yml` — `docker compose up -d db` for Postgres while the API runs in Rider (connection string in user-secrets), or the full api + db stack for container verification. SPA: `npm run dev`, with `VITE_API_BASE_URL` from `.env.development` pointing at the local API. Landing: `npm run dev`, no dependencies | MVP (revised) |
 | 10 | Landing data | **Room content hardcoded in the landing repo** (a typed data file / content collection), static output; WhatsApp is the real CTA; "Try the booking demo" links to the SPA. No build-time API fetch | MVP (revised 2026-10-21 b) |
 | 11 | Content | Real property; photos/copy later → placeholder imagery now, swap when it arrives | MVP |
 | 12 | Locale | `ms` + `en` with a visible switcher on the landing (cheap because content is placeholder); in the API, room text comes from locale columns | MVP |
@@ -55,8 +55,8 @@ Non-goal: real reservations. The landing never promises a booked stay; the booki
 | 15 | Double-booking | **DB-enforced**: `BookingNight` rows + partial unique index `(room_id, night_date) WHERE status <> 'Cancelled'`; `23505 → 409`; naive check first, failing test kept | MVP — the flagship story |
 | 16 | Media | Placeholder images committed to the landing repo; upload pipeline to Azure Blob Storage | **Phase 2** |
 | 17 | Testing + CI/CD | **API:** unit tests (pricing/dates/state machine) + Testcontainers Postgres for booking-create and the N-concurrent race; CI build/test/`docker build`; CD on `main`: push image to GHCR → deploy to Container Apps via GitHub Actions + OIDC. **SPA + landing:** a small CI workflow (typecheck + build) on PRs; deploys handled by Cloudflare Pages on push to `main`, with a preview URL per PR. No e2e, no coverage gates | MVP (revised 2026-10-21 b) |
-| 18 | React stack | TanStack Query + OpenAPI-generated client + react-hook-form + Zod + React Router + shadcn/ui + Tailwind | MVP |
-| 19 | Repo wiring | **Per repo, nothing shared.** API: one .NET solution + `compose.yml` + `global.json` + `dotnet-tools.json`. SPA and landing: plain pnpm projects. No workspace, no Taskfile — each README lists its handful of commands | MVP (revised 2026-10-21 b) |
+| 18 | React stack | TanStack Query + OpenAPI-generated client + react-hook-form + Zod + React Router + Tailwind, with a few small hand-written UI components instead of shadcn/ui | MVP (revised 2026-11-07) |
+| 19 | Repo wiring | **Per repo, nothing shared.** API: one .NET solution + `compose.yml` + `global.json` + `dotnet-tools.json`. SPA and landing: plain npm projects. No workspace, no Taskfile — each README lists its handful of commands | MVP (revised 2026-10-21 b) |
 | 20 | Demo safety | Seed + manual reset endpoint + per-IP rate limits on public writes | MVP (nightly job → Phase 2) |
 | 21 | Domains | `senabayu.hakimrazak.com` (landing → Cloudflare Pages), `senabayu-demo.hakimrazak.com` (SPA → Cloudflare Pages), `api.senabayu-demo.hakimrazak.com` (API → Container Apps). Pages custom domains are added from the Pages dashboard (proxied, certificates automatic). The API hostname is a **DNS-only (grey-cloud) CNAME** to Azure so Azure's free managed certificate validates and renews. Swap to the property's own domain later with 301s | MVP (revised 2026-10-21 b) |
 | 22 | Content freshness | Not needed: the landing no longer depends on API data. If phase 2 ever moves room content into the API, add a build-time fetch + a Cloudflare Pages deploy hook then | **Removed** (2026-10-21 b) |
@@ -78,7 +78,7 @@ Non-goal: real reservations. The landing never promises a booked stay; the booki
   through the API, which is where the Docker + Container Apps + Postgres story is.
 - **Landing data hardcoded.** The landing is marketing copy. Fetching it from a scale-to-zero API at build time
   couples a free static deploy to a cold-starting container for no visible benefit.
-- **Committed OpenAPI snapshot in the SPA repo.** `pnpm gen:api` downloads `/openapi/v1.json` from a running API
+- **Committed OpenAPI snapshot in the SPA repo.** `npm run gen:api` downloads `/openapi/v1.json` from a running API
   into `openapi/v1.json` and regenerates the typed client from it. Both are committed, so the SPA builds without
   the API running and a contract change shows up as a reviewable diff.
 - **Single API project, folder discipline.** Compiler-enforced layering is a senior-interview topic; you need
@@ -180,7 +180,7 @@ senabayu-booking/
 └── src/
     ├── app/                       # router, providers, layout, error boundary
     ├── features/                  # rooms | booking | lookup | demo | admin
-    ├── components/ui/             # shadcn/ui
+    ├── components/ui/             # small shared components: Button, Field, Card
     └── lib/
         ├── api/                   # generated types/client (from openapi/v1.json) + thin fetch wrapper
         └── ...                    # query keys, zod schemas, helpers
@@ -299,7 +299,7 @@ custom domain + managed cert; CI green; **CD deploys `main` to Container Apps vi
 healthchecks vs Container Apps probes, compose services/networks, EF migrations, DI lifetimes, OIDC federated
 credentials vs stored secrets, managed database vs database container, scale-to-zero and cold starts.
 
-**M2 — `senabayu-booking` SPA booking flow (≈10 h).** Vite + React + TS + Tailwind + shadcn + TanStack Query +
+**M2 — `senabayu-booking` SPA booking flow (≈10 h).** Vite + React + TS + Tailwind + TanStack Query +
 generated client (from the committed `openapi/v1.json`); rooms list, availability, quote, booking form (RHF + Zod),
 confirmation + reference lookup; repo connected to **Cloudflare Pages** with the custom domain
 `senabayu-demo.hakimrazak.com` and `VITE_API_BASE_URL` set as a Pages build variable; API CORS allows that origin.
