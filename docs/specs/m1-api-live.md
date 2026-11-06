@@ -176,7 +176,7 @@ Record **every** `az` command you run, in order, in `deploy/azure/README.md`, wi
 31. `.github/workflows/ci.yml` on pull requests, and called by `deploy.yml` on `main`: restore → build → test, plus
     `docker build` (no push).
 32. **OIDC instead of secrets:** user-assigned managed identity `senabayu-github-deploy` with a **federated
-    credential** for `repo:kimchi11y/senabayu-api:ref:refs/heads/main`, granted **Container Apps Contributor on
+    credential** for `repo:kimchi11y@<owner-id>/senabayu-api@<repo-id>:ref:refs/heads/main`, granted **Container Apps Contributor on
     `rg-senabayu` only**. Store `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` as GitHub **variables**.
 33. `.github/workflows/deploy.yml` on push to `main`: `permissions: id-token: write, packages: write, contents:
     read` → build + push `ghcr.io/...:<sha>` with `GITHUB_TOKEN` → `azure/login` (OIDC) →

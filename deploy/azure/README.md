@@ -190,6 +190,8 @@ az containerapp hostname bind -g rg-senabayu -n senabayu-api --hostname $D \
 
 ## 9. Deploys from GitHub Actions (OIDC)
 
+GitHub tokens name the repo with its numeric IDs (`gh api repos/kimchi11y/senabayu-api --jq "[.owner.id, .id]"`).
+
 A user-assigned managed identity that only `main` of this repo can log in as, limited to Container Apps in this
 resource group. There is no stored secret: the three values below are identifiers, so they are GitHub **variables**.
 
@@ -199,7 +201,7 @@ az identity create -g rg-senabayu -n senabayu-github-deploy -l malaysiawest
 
 az identity federated-credential create -g rg-senabayu --identity-name senabayu-github-deploy -n github-main \
   --issuer https://token.actions.githubusercontent.com \
-  --subject repo:kimchi11y/senabayu-api:ref:refs/heads/main \
+  --subject "repo:kimchi11y@<owner-id>/senabayu-api@<repo-id>:ref:refs/heads/main" \
   --audiences api://AzureADTokenExchange
 
 az role assignment create \
