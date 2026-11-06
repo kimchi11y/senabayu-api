@@ -42,7 +42,7 @@ Non-goal: real reservations. The landing never promises a booked stay; the booki
 | 2 | Domain model | `RoomType` → `Room` → `Booking` → `BookingNight` (per-night rows) | MVP |
 | 3 | Access | Guest checkout (no guest accounts) + booking-reference lookup; JWT admin | MVP |
 | 4 | Backend structure | **Single Web API project, controller-based** (`[ApiController]` + `ControllerBase`, like `BookingSystem`), with folder discipline (`Domain/`, `Data/`, `Controllers/`, `Dtos/`, `Services/`, `Infrastructure/`) — not 4 projects. Controllers stay thin; booking/pricing logic lives in `Services/` so it can be unit-tested | MVP (revised 2026-10-21: controllers over minimal APIs) |
-| 5 | Working mode | **You write all code.** I write specs + acceptance criteria + concept explainers, and review with reasoning | MVP |
+| 5 | Working mode | **Claude writes the code and explains each step**; you read it, run it, and must be able to explain it in an interview (see Resume honesty in §10) | MVP (revised 2026-11-07) |
 | 6 | Time budget | ~8–10 h/week, **4 weeks (~41 h)** | MVP (revised) |
 | 7 | Sequence | API skeleton live → SPA booking flow → invariant + admin → landing + portfolio | MVP |
 | 8 | Hosting | **API on Azure** (Azure for Students subscription, region Southeast Asia or whichever the subscription allows): image on **Azure Container Apps** (Consumption, scale-to-zero); **Azure Database for PostgreSQL Flexible Server** (smallest burstable SKU). **Landing and SPA on Cloudflare Pages** (free), each via Cloudflare's Git integration | MVP (revised 2026-10-21 b) |
@@ -144,7 +144,7 @@ senabayu-api/
 ├── dotnet-tools.json              # dotnet-ef
 ├── .editorconfig
 ├── .gitignore
-├── Dockerfile                     # multi-stage: SDK -> aspnet runtime, non-root, healthcheck
+├── Dockerfile                     # multi-stage: SDK -> aspnet runtime, non-root
 ├── compose.yml                    # local, production-shaped: api, db (+ volume, healthchecks, network)
 ├── .env.example
 ├── .github/workflows/
@@ -286,7 +286,7 @@ test passes and stays in the repo as the proof.
 
 ## 8. MVP milestones (~41 h)
 
-Each milestone is a runnable, deployed increment. Per slice: I write the spec, you write the code, I review the PR.
+Each milestone is a runnable, deployed increment. Per slice: Claude writes the spec and code and explains them; you run, read and merge.
 
 **M1 — `senabayu-api` skeleton live on Azure (≈12 h).**
 Repo + .NET solution; single `Homestay.Api` project; EF Core + Postgres (compose, named volume); first migration +
@@ -356,8 +356,7 @@ Ordered by resume value:
 
 ## 10. Working agreement
 
-- **You write every line of application code.** I don't edit application source in any of the three repos; I
-  write specs and review diffs with reasoning.
+- **Claude writes the application code and explains it; you read and run it.** Don't merge what you can't explain.
 - **One branch per slice** (`feat/booking-create`), PR into `main`, description = what/why/how verified; I review
   before merge; squash merge; Conventional Commits.
 - **Definition of done per slice:** builds; runs locally; new logic has a test; migrations committed; README

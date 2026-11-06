@@ -6,7 +6,7 @@ Database for PostgreSQL, running as a container on Azure Container Apps, redeplo
 Actions on every merge to `main`. Locally the same image runs under one `docker compose` command. No SPA, no
 landing, no auth.
 
-You write all of this. This spec is the acceptance contract; I review the PR against it.
+This spec is the acceptance contract. Claude writes the code and explains it (`PLAN.md` decision 5).
 
 > Rewritten 2026-10-21 for the three-repo split and controller-based API (`PLAN.md` decisions 1, 4, 19).
 > Replaces the monorepo-era `m1-skeleton-api-live.md`.
@@ -153,7 +153,7 @@ Record **every** `az` command you run, in order, in `deploy/azure/README.md`, wi
     with email alerts at 50 % and 90 %.
 21. Install the Azure CLI + `containerapp` extension. Create resource group `rg-senabayu` in Southeast Asia (or the
     region your subscription's policy allows — a policy error names the allowed regions).
-22. **PostgreSQL Flexible Server**: Burstable B1ms, smallest storage, same major version as local, public access,
+22. **PostgreSQL Flexible Server** (connection string also needs `GSS Encryption Mode=Disable`, see `compose.yml`): Burstable B1ms, smallest storage, same major version as local, public access,
     firewall rule for **your IP only** plus "allow Azure services". Create database `senabayu` and an app login
     that isn't the server admin. TLS is required (`SSL Mode=Require` in the connection string).
 23. Apply the schema by hand: `dotnet ef migrations bundle`, run it against the Azure connection string from your

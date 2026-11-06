@@ -18,16 +18,26 @@ builder.Services.AddDbContext<AppDbContext>(options => options
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>(tags: ["ready"]);
 
+// Every error response is ProblemDetails JSON with a stable "code" the SPA can switch on.
+builder.Services.AddProblemDetails(options =>
+    options.CustomizeProblemDetails = context =>
+        context.ProblemDetails.Extensions.TryAdd("code", context.ProblemDetails.Status switch
+        {
+            400 => "validation_error",
+            404 => "not_found",
+            _ => "internal_error"
+        }));
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-    app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "Senabayu API v1"));
-}
 
-app.UseHttpsRedirection();
+// First, so it catches exceptions thrown by everything after it.
+app.UseExceptionHandler();
+
+// Not limited to Development: the live demo link and the SPA's client generation use these.
+app.MapOpenApi();
+app.UseSwaggerUI(o => o.SwaggerEndpoint("/openapi/v1.json", "Senabayu API v1"));
 
 app.UseAuthorization();
 
